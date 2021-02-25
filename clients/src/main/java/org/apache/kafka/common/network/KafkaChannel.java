@@ -94,6 +94,7 @@ public class KafkaChannel {
     }
 
     public boolean ready() {
+        // TODO authenticator 实现类是 DefaultAuthenticator，具体看 PlaintextChannelBuilder.buildChannel
         return transportLayer.ready() && authenticator.complete();
     }
 

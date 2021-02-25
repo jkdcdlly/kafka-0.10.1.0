@@ -13,12 +13,8 @@
 package org.apache.kafka.clients.producer.internals;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentMap;
 
 import org.apache.kafka.clients.ClientRequest;
 import org.apache.kafka.clients.ClientResponse;
@@ -263,7 +259,8 @@ public class Sender implements Runnable {
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
-        if (response.wasDisconnected()) {
+
+        if (response.wasDisconnected()) { // 链接失败分支
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
                                                                                                   .destination());
@@ -276,11 +273,18 @@ public class Sender implements Runnable {
             // if we have a response, parse it
             if (response.hasResponse()) {
                 ProduceResponse produceResponse = new ProduceResponse(response.responseBody());
+                // 遍历响应：一个批次有多个请求和响应
                 for (Map.Entry<TopicPartition, ProduceResponse.PartitionResponse> entry : produceResponse.responses().entrySet()) {
                     TopicPartition tp = entry.getKey();
                     ProduceResponse.PartitionResponse partResp = entry.getValue();
+
                     Errors error = Errors.forCode(partResp.errorCode);
+                    // TODO 获取此请求处理的 batch
+                    // 注意这里的 batches 不要与 RecordAccumulator对象里的 batches 混淆，
+                    // RecordAccumulator里的batchs是 ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+                    // 这里是 Map<TopicPartition, RecordBatch> batches
                     RecordBatch batch = batches.get(tp);
+                    // 处理响应核心代码
                     completeBatch(batch, error, partResp.baseOffset, partResp.timestamp, correlationId, now);
                 }
                 this.sensors.recordLatency(response.request().request().destination(), response.requestLatencyMs());
@@ -305,23 +309,26 @@ public class Sender implements Runnable {
      * @param now The current POSIX time stamp in milliseconds
      */
     private void completeBatch(RecordBatch batch, Errors error, long baseOffset, long timestamp, long correlationId, long now) {
-        if (error != Errors.NONE && canRetry(batch, error)) {
+        if (error != Errors.NONE && canRetry(batch, error)) {// 有异常，但可以重试
             // retry
             log.warn("Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",
                      correlationId,
                      batch.topicPartition,
                      this.retries - batch.attempts - 1,
                      error);
+            // 把失败的 RecordBatch 放回到 queue 的第一位
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
-        } else {
+        } else {// 无异常，或者有异常但不可以重试
             RuntimeException exception;
-            if (error == Errors.TOPIC_AUTHORIZATION_FAILED)
+            if (error == Errors.TOPIC_AUTHORIZATION_FAILED)// Topic权限问题
                 exception = new TopicAuthorizationException(batch.topicPartition.topic());
-            else
+            else // 其他异常
                 exception = error.exception();
             // tell the user the result of their request
+            // TODO 遍历每条消息，给用户反馈每条消息的响应
             batch.done(baseOffset, timestamp, exception);
+            // TODO 回收内存
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
@@ -371,6 +378,7 @@ public class Sender implements Runnable {
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());
         RequestCompletionHandler callback = new RequestCompletionHandler() {
+            // TODO 请求的回调函数
             public void onComplete(ClientResponse response) {
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }

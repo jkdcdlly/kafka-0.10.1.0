@@ -46,6 +46,7 @@ public class Producer extends Thread {
             String messageStr = "Message_" + messageNo;
             long startTime = System.currentTimeMillis();
             if (isAsync) { // Send asynchronously
+                new ProducerRecord<>(topic, messageNo+"")
                 producer.send(
                         new ProducerRecord<>(topic, messageNo, messageStr),
                         new DemoCallBack(startTime, messageNo, messageStr)

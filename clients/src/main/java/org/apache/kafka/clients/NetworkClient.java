@@ -150,12 +150,13 @@ public class NetworkClient implements KafkaClient {
     public boolean ready(Node node, long now) {
         if (node.isEmpty())
             throw new IllegalArgumentException("Cannot connect to empty node " + node);
-
+        // TODO 第1步 判断是否准备好链接（第一次肯定没准备好）
         if (isReady(node, now))
             return true;
-
+        // TODO 第2步 判断是否可以进行链接（第一次肯定可以，或者重试时间到了）
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            // TODO 第3步 初始化链接
             initiateConnect(node, now);
 
         return false;
@@ -212,9 +213,9 @@ public class NetworkClient implements KafkaClient {
     public boolean isReady(Node node, long now) {
         // if we need to update our metadata now declare all requests unready to make metadata requests first
         // priority
-        // TODO 发送数据不能与更新元数据是同一时间
+        // TODO 第一步：判断当前是否在更新元数据（发送数据不能与更新元数据是同一时间）
         return !metadataUpdater.isUpdateDue(now)
-        // TODO 判断是否可以发送请求
+        // TODO 第二步：判断是否可以发送请求
                 && canSendRequest(node.idString());
     }
 
@@ -224,11 +225,11 @@ public class NetworkClient implements KafkaClient {
      * @param node The node
      */
     private boolean canSendRequest(String node) {
-        //TODO 判断是否已经链接，connectionStates有个map，存储每个主机的链接状态
+        //TODO 第1步：判断是否已经链接，connectionStates有个map，存储每个主机的链接状态
         return connectionStates.isConnected(node)
-                //TODO Kafka封装了NIO的selector 和 socketChannel
+                //TODO 第2步：Kafka封装了NIO的selector 和 socketChannel
                 && selector.isChannelReady(node)
-                //TODO 判断是否已经有5个请求未返回
+                //TODO 第3步：判断是否已经有5个请求未返回
                 && inFlightRequests.canSendMore(node);
     }
 
@@ -278,15 +279,17 @@ public class NetworkClient implements KafkaClient {
         handleCompletedSends(responses, updatedNow);
         // 处理响应，并处理body
         handleCompletedReceives(responses, updatedNow);
-        // 处理任何断开的连接
+        // 处理断开的连接
         handleDisconnections(responses, updatedNow);
         // 记录所有新完成的连接
         handleConnections();
         // 处理超时的连接
         handleTimedOutRequests(responses, updatedNow);
         for (ClientResponse response : responses) {
+            // 判断是否有回调函数
             if (response.request().hasCallback()) {
                 try {
+                    // 调用响应的回调函数
                     response.request().callback().onComplete(response);
                 } catch (Exception e) {
                     log.error("Uncaught error in request completion:", e);
@@ -454,12 +457,18 @@ public class NetworkClient implements KafkaClient {
      * @param now The current time
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
+        // TODO 循环处理响应
         for (NetworkReceive receive : this.selector.completedReceives()) {
+            // TODO 第一步 获取broker id
             String source = receive.source();
+            // TODO 第二步 移除已经收到响应的请求
             ClientRequest req = inFlightRequests.completeNext(source);
+            // TODO 第三步 解析响应
             Struct body = parseResponse(receive.payload(), req.request().header());
-            // TODO 处理响应
+            // TODO 第四步 处理响应
+            // metadataUpdater.maybeHandleCompletedReceive 是处理关于元数据的响应
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
+                // TODO 封装请求和响应
                 responses.add(new ClientResponse(req, now, false, body));
         }
     }
@@ -503,10 +512,14 @@ public class NetworkClient implements KafkaClient {
      * Initiate a connection to the given node
      */
     private void initiateConnect(Node node, long now) {
+        // broker id
         String nodeConnectionId = node.idString();
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
+            // TODO 给 nodeState（map）put 数据
+            // TODO key 是 brokerid,value 是 NodeConnectionState 对象，状态为 CONNECTING
             this.connectionStates.connecting(nodeConnectionId, now);
+            // TODO 与服务端进行连接
             selector.connect(nodeConnectionId,
                              new InetSocketAddress(node.host(), node.port()),
                              this.socketSendBuffer,

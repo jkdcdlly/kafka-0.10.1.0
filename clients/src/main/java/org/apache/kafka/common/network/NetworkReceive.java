@@ -76,7 +76,9 @@ public class NetworkReceive implements Receive {
     // This can go away after we get rid of BlockingChannel
     @Deprecated
     public long readFromReadableChannel(ReadableByteChannel channel) throws IOException {
+        // TODO 粘包拆包
         int read = 0;
+        // TODO 先读取4个字节，这4个字节代表的后面数据的长度
         if (size.hasRemaining()) {
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
@@ -93,6 +95,7 @@ public class NetworkReceive implements Receive {
                 this.buffer = ByteBuffer.allocate(receiveSize);
             }
         }
+        // TODO 读取指定的长度，这里是实际的数据
         if (buffer != null) {
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)

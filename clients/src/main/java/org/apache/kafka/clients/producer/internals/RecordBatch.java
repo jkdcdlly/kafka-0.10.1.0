@@ -67,7 +67,7 @@ public final class RecordBatch {
         if (!this.records.hasRoomFor(key, value)) {
             return null;
         } else {
-            // 将新记录和偏移量追加到缓冲区
+            // TODO 将新记录和偏移量追加到缓冲区
             long checksum = this.records.append(offsetCounter++, timestamp, key, value);
             this.maxRecordSize = Math.max(this.maxRecordSize, Record.recordSize(key, value));
             this.lastAppendTime = now;
@@ -75,6 +75,7 @@ public final class RecordBatch {
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length);
+            // 每条消息会对应一个 Thunk 对象
             if (callback != null)
                 thunks.add(new Thunk(callback, future));
             this.recordCount++;
@@ -95,10 +96,11 @@ public final class RecordBatch {
                   baseOffset,
                   exception);
         // execute callbacks
+        // thunks 就是发送的每一条消息，thunks是在tryAppend函数里赋值的
         for (int i = 0; i < this.thunks.size(); i++) {
             try {
                 Thunk thunk = this.thunks.get(i);
-                if (exception == null) {
+                if (exception == null) {// 没有异常
                     // If the timestamp returned by server is NoTimestamp, that means CreateTime is used. Otherwise LogAppendTime is used.
                     RecordMetadata metadata = new RecordMetadata(this.topicPartition,  baseOffset, thunk.future.relativeOffset(),
                                                                  timestamp == Record.NO_TIMESTAMP ? thunk.future.timestamp() : timestamp,

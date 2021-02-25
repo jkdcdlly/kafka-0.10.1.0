@@ -312,7 +312,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             // TODO 第13步 更新元数据
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
-            ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
+            ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());// 使用 PLAINTEXT 协议
             // TODO 第14步 构建一个 NetworkClient
             NetworkClient client = new NetworkClient(
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
@@ -484,7 +484,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // TODO 第三步 对记录进行分区
             int partition = partition(record, serializedKey, serializedValue, cluster);
 
-            // TODO 第四步 检查记录大小
+            // TODO 第四步 检查记录大小  LOG_OVERHEAD = SIZE_LENGTH(4) + OFFSET_LENGTH(8);
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
             ensureValidRecordSize(serializedSize);
 

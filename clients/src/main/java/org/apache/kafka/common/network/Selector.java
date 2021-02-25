@@ -168,12 +168,16 @@ public class Selector implements Selectable {
      */
     @Override
     public void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException {
+        // TODO 判断是否与指定broker有 socketChannel 了
         if (this.channels.containsKey(id))
             throw new IllegalStateException("There is already a connection for id " + id);
-
+        // TODO NIO 客户端
         SocketChannel socketChannel = SocketChannel.open();
+        // TODO NIO 客户端非阻塞
         socketChannel.configureBlocking(false);
+        // TODO 获取与此 socketChannel 关联的 socket
         Socket socket = socketChannel.socket();
+        // TODO 设置 socket 保持活跃
         socket.setKeepAlive(true);
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
@@ -187,6 +191,7 @@ public class Selector implements Selectable {
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            // TODO 与服务端建立连接
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -195,14 +200,19 @@ public class Selector implements Selectable {
             socketChannel.close();
             throw e;
         }
+        // TODO 注册一个 OP_CONNECT 事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
+        // TODO 构建一个 KafkaChannel，里面封装了 socketChannel; 默认实现类：PlaintextChannelBuilder
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
         key.attach(channel);
+        // TODO 连接 broker 所对应的 channel
         this.channels.put(id, channel);
-
+        // TODO 如果连接成功
         if (connected) {
             // OP_CONNECT won't trigger for immediately connected channels
+            // TODO channel.id() 就是 broker id
             log.debug("Immediately connected to node {}", channel.id());
+            // TODO 把注册后得到的 key 存储到一个 set 集合
             immediatelyConnectedKeys.add(key);
             key.interestOps(0);
         }
@@ -288,20 +298,22 @@ public class Selector implements Selectable {
     public void poll(long timeout) throws IOException {
         if (timeout < 0)
             throw new IllegalArgumentException("timeout should be >= 0");
+        // TODO 清空所有链接相关集合 及 所有请求和响应相关集合
         clear();
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
         /* check ready keys */
         long startSelect = time.nanoseconds();
-        // TODO 从 nio Selector 上找到注册了多少个key
+        // TODO 获得就绪的 key 的数量
         int readyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
-        // TODO 如果注册有事件，那么就对 select 上的 key 进行处理
+        // TODO 对 就绪的事件进行处理
         if (readyKeys > 0 || !immediatelyConnectedKeys.isEmpty()) {
             pollSelectionKeys(this.nioSelector.selectedKeys(), false, endSelect);
             pollSelectionKeys(immediatelyConnectedKeys, true, endSelect);
         }
+        // TODO 检查 stagedReceives 集合是否有 broker 响应 ，并把 broker 的 响应 存储到 completedReceives 里
         addToCompletedReceives();
         long endIo = time.nanoseconds();
         this.sensors.ioTime.record(endIo - endSelect, time.milliseconds());
@@ -313,22 +325,23 @@ public class Selector implements Selectable {
     private void pollSelectionKeys(Iterable<SelectionKey> selectionKeys,
                                    boolean isImmediatelyConnected,
                                    long currentTimeNanos) {
+        // TODO 遍历所有就绪事件
         Iterator<SelectionKey> iterator = selectionKeys.iterator();
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
-            iterator.remove();
+            iterator.remove();// TODO 移除已处理的事件
             KafkaChannel channel = channel(key);
-
             // register all per-connection metrics at once
             sensors.maybeRegisterConnectionMetrics(channel.id());
             if (idleExpiryManager != null)
                 idleExpiryManager.update(channel.id(), currentTimeNanos);
-
             try {
-
                 /* complete any connections that have finished their handshake (either normally or immediately) */
+                // TODO 处理 connect 事件
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    // TODO 是否完成连接，并注册 OP_READ 事件
                     if (channel.finishConnect()) {
+                        // TODO 把 已经完成连接的 broker 记录到 集合中
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
                         SocketChannel socketChannel = (SocketChannel) key.channel();
@@ -346,17 +359,23 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
+                // TODO 处理 read 事件
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+                    // TODO channel.read() 读取响应，并把响应存储到 stagedReceives 里
                     while ((networkReceive = channel.read()) != null)
                         addToStagedReceives(channel, networkReceive);
                 }
 
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
+                // TODO 处理 write 事件
                 if (channel.ready() && key.isWritable()) {
+                    // TODO 发送数据
                     Send send = channel.write();
                     if (send != null) {
+                        // TODO 记录发送成功的请求
                         this.completedSends.add(send);
+                        // TODO 记录给该 broker 发送的字节数
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
                 }
@@ -577,15 +596,21 @@ public class Selector implements Selectable {
      * checks if there are any staged receives and adds to completedReceives
      */
     private void addToCompletedReceives() {
+        // TODO stagedReceives 不为空，说明读到了 broker 的响应
         if (!this.stagedReceives.isEmpty()) {
             Iterator<Map.Entry<KafkaChannel, Deque<NetworkReceive>>> iter = this.stagedReceives.entrySet().iterator();
+            // TODO 遍历 broker 响应
             while (iter.hasNext()) {
                 Map.Entry<KafkaChannel, Deque<NetworkReceive>> entry = iter.next();
+                // TODO key
                 KafkaChannel channel = entry.getKey();
                 if (!channel.isMute()) {
+                    // TODO value
                     Deque<NetworkReceive> deque = entry.getValue();
                     NetworkReceive networkReceive = deque.poll();
+                    // TODO 把 broker 的 响应 存储到 completedReceives 里
                     this.completedReceives.add(networkReceive);
+
                     this.sensors.recordBytesReceived(channel.id(), networkReceive.payload().limit());
                     if (deque.isEmpty())
                         iter.remove();

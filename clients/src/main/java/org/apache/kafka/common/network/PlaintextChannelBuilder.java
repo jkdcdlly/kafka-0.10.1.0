@@ -38,9 +38,11 @@ public class PlaintextChannelBuilder implements ChannelBuilder {
     public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize) throws KafkaException {
         KafkaChannel channel = null;
         try {
+            // TODO 第一步 把 SocketChannel 封装到 PlaintextTransportLayer
             PlaintextTransportLayer transportLayer = new PlaintextTransportLayer(key);
             Authenticator authenticator = new DefaultAuthenticator();
             authenticator.configure(transportLayer, this.principalBuilder, this.configs);
+            // TODO 第二步 把 PlaintextTransportLayer 封装到 KafkaChannel
             channel = new KafkaChannel(id, transportLayer, authenticator, maxReceiveSize);
         } catch (Exception e) {
             log.warn("Failed to create channel due to ", e);
