@@ -36,11 +36,13 @@ final class InFlightRequests {
      * Add the given request to the queue for the connection it was directed to
      */
     public void add(ClientRequest request) {
+
         Deque<ClientRequest> reqs = this.requests.get(request.request().destination());
         if (reqs == null) {
             reqs = new ArrayDeque<>();
             this.requests.put(request.request().destination(), reqs);
         }
+        // TODO 添加请求到队列
         reqs.addFirst(request);
     }
 

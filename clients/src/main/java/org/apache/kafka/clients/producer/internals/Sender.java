@@ -211,7 +211,7 @@ public class Sender implements Runnable {
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
-        // TODO 第7步 创建发送消息的请求
+        // TODO 第7步 创建发送消息的请求 (这里会封装一个异步回调函数)
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -225,6 +225,7 @@ public class Sender implements Runnable {
         }
         // TODO 第8步 将给定的发送请求排队。请求只能发送到就绪节点
         for (ClientRequest request : requests)
+            //TODO 使用 inFlightRequests 中的队列排队 ： this.inFlightRequests.add(request);
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;
@@ -259,8 +260,8 @@ public class Sender implements Runnable {
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
-
-        if (response.wasDisconnected()) { // 链接失败分支
+        if (response.wasDisconnected()) {
+            // TODO 第1步  处理失败的响应
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
                                                                                                   .destination());
@@ -273,11 +274,10 @@ public class Sender implements Runnable {
             // if we have a response, parse it
             if (response.hasResponse()) {
                 ProduceResponse produceResponse = new ProduceResponse(response.responseBody());
-                // 遍历响应：一个批次有多个请求和响应
+                // TODO 第2步 遍历响应，里面会有各种响应，如 建立连接的，write 的，read的
                 for (Map.Entry<TopicPartition, ProduceResponse.PartitionResponse> entry : produceResponse.responses().entrySet()) {
                     TopicPartition tp = entry.getKey();
                     ProduceResponse.PartitionResponse partResp = entry.getValue();
-
                     Errors error = Errors.forCode(partResp.errorCode);
                     // TODO 获取此请求处理的 batch
                     // 注意这里的 batches 不要与 RecordAccumulator对象里的 batches 混淆，
@@ -309,8 +309,8 @@ public class Sender implements Runnable {
      * @param now The current POSIX time stamp in milliseconds
      */
     private void completeBatch(RecordBatch batch, Errors error, long baseOffset, long timestamp, long correlationId, long now) {
-        if (error != Errors.NONE && canRetry(batch, error)) {// 有异常，但可以重试
-            // retry
+        if (error != Errors.NONE && canRetry(batch, error)) {
+            //TODO 有异常，但可以重试
             log.warn("Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",
                      correlationId,
                      batch.topicPartition,
@@ -319,7 +319,8 @@ public class Sender implements Runnable {
             // 把失败的 RecordBatch 放回到 queue 的第一位
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
-        } else {// 无异常，或者有异常但不可以重试
+        } else {
+            //TODO 无异常 或者 有异常但不可以重试
             RuntimeException exception;
             if (error == Errors.TOPIC_AUTHORIZATION_FAILED)// Topic权限问题
                 exception = new TopicAuthorizationException(batch.topicPartition.topic());
@@ -357,6 +358,7 @@ public class Sender implements Runnable {
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
+        // TODO 对 broker 封装 request 请求
         for (Map.Entry<Integer, List<RecordBatch>> entry : collated.entrySet())
             requests.add(produceRequest(now, entry.getKey(), acks, requestTimeout, entry.getValue()));
         return requests;
@@ -368,6 +370,7 @@ public class Sender implements Runnable {
     private ClientRequest produceRequest(long now, int destination, short acks, int timeout, List<RecordBatch> batches) {
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
+        // TODO 为某个 broker 所有 batch 封装一个 ProduceRequest 请求
         for (RecordBatch batch : batches) {
             TopicPartition tp = batch.topicPartition;
             produceRecordsByPartition.put(tp, batch.records.buffer());

@@ -249,6 +249,8 @@ public class NetworkClient implements KafkaClient {
 
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
+        // TODO 把请求添加到 队列中
+        //  inFlightRequests 中有一个 map 结构，key 是 broker id,value 是一个队列，队列里存放 ClientRequest 对象
         this.inFlightRequests.add(request);
         selector.send(request.request());
     }
@@ -272,24 +274,26 @@ public class NetworkClient implements KafkaClient {
         } catch (IOException e) {
             log.error("Unexpected error during I/O", e);
         }
-        // TODO 第3步 处理响应
+        // TODO 第3步 把所有响应存储到 responses 集合中
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
-        // 处理响应，但没有body返回
+        // TODO 处理 stagedReceives 集合：write事件 的相应
         handleCompletedSends(responses, updatedNow);
-        // 处理响应，并处理body
+        // TODO 处理 completedReceives 集合：read事件 及 connect 事件响应
         handleCompletedReceives(responses, updatedNow);
-        // 处理断开的连接
+        // TODO 处理 disconnected 集合：断开的连接
         handleDisconnections(responses, updatedNow);
-        // 记录所有新完成的连接
+        // TODO 处理 connected 集合：集合存储的是 broker，代表已经连接成功的主机；在 connect 事件处理流程中添加
         handleConnections();
-        // 处理超时的连接
+        // TODO 处理 inFlightRequests 中超时的连接
         handleTimedOutRequests(responses, updatedNow);
+        // TODO 第4步 调用所有响应的回调
         for (ClientResponse response : responses) {
             // 判断是否有回调函数
             if (response.request().hasCallback()) {
                 try {
                     // 调用响应的回调函数
+                    // sender.run
                     response.request().callback().onComplete(response);
                 } catch (Exception e) {
                     log.error("Uncaught error in request completion:", e);
@@ -441,10 +445,17 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
+        //TODO completedSends 是一个 ArrayList<Send>，存储完成发送的请求
+        // TODO ??
         for (Send send : this.selector.completedSends()) {
+            //TODO 获得第一个请求对象，不移除 ：requestQueue(node).peekFirst(); 队列里默认最多5个请求
+            //TODO ? 注意 这个队列是插入数据的时候使用的是 addFirst ,所以 peekFirst 其实取的是 最后的请求
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
             if (!request.expectResponse()) {
+                //TODO 获得第一个请求对象，并移除 ： requestQueue(node).pollFirst();
+                //TODO ? 注意 这个队列是插入数据的时候使用的是 addFirst ,所以 pollFirst 其实取的是最后的请求
                 this.inFlightRequests.completeLastSent(send.destination());
+                // TODO 封装 ClientRequest 到 ClientResponse
                 responses.add(new ClientResponse(request, now, false, null));
             }
         }
@@ -457,18 +468,20 @@ public class NetworkClient implements KafkaClient {
      * @param now The current time
      */
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
-        // TODO 循环处理响应
+        // TODO 循环处理响应 （selector.completedReceives() 在 poll 函数里赋值）
+        // this.selector.completedReceives() 不为空说明有读取到响应
         for (NetworkReceive receive : this.selector.completedReceives()) {
             // TODO 第一步 获取broker id
             String source = receive.source();
-            // TODO 第二步 移除已经收到响应的请求
+            // TODO 第二步 从队列中已经收到响应的请求 : requestQueue(node).pollLast();
+            //TODO ? 注意 这个队列是插入数据的时候使用的是 addFirst ,所以 pollLast 其实取的是 最初的请求
             ClientRequest req = inFlightRequests.completeNext(source);
             // TODO 第三步 解析响应
             Struct body = parseResponse(receive.payload(), req.request().header());
             // TODO 第四步 处理响应
             // metadataUpdater.maybeHandleCompletedReceive 是处理关于元数据的响应
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
-                // TODO 封装请求和响应
+                // TODO 封装请求和响应（不是元数据更新才走此分支）
                 responses.add(new ClientResponse(req, now, false, body));
         }
     }
